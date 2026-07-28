@@ -1,0 +1,74 @@
+/* Spinning ASCII donut — C99, no external libraries.
+   Build: gcc -O3 -std=c99 spinning_donut.c -lm -o spinning_donut
+   Stop: Ctrl+C */
+
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+static void enable_ansi(void) {
+    HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode;
+    if (GetConsoleMode(console, &mode))
+        SetConsoleMode(console, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+}
+#else
+static void enable_ansi(void) { }
+#endif
+
+int main(void) {
+    const char shades[] = ".,-~:;=!*#$@";
+    float a = 0.0f, b = 0.0f;
+    char pixels[1760];
+    float zbuffer[1760];
+
+    enable_ansi();
+    fputs("\x1b[2J\x1b[?25l", stdout);  /* clear screen; hide cursor */
+
+    for (;;) {
+        const float sin_a = sinf(a), cos_a = cosf(a);
+        const float sin_b = sinf(b), cos_b = cosf(b);
+        memset(pixels, ' ', sizeof pixels);
+        memset(zbuffer, 0, sizeof zbuffer);
+
+        /* theta and phi steps trade tiny detail for a fast, smooth animation. */
+        for (float j = 0.0f; j < 6.28f; j += 0.07f) {
+            const float sin_j = sinf(j), cos_j = cosf(j);
+            const float circle = cos_j + 2.0f;
+            for (float i = 0.0f; i < 6.28f; i += 0.02f) {
+                const float sin_i = sinf(i), cos_i = cosf(i);
+                const float inverse_depth =
+                    1.0f / (sin_i * circle * sin_a + sin_j * cos_a + 5.0f);
+                const float rotated_height = sin_i * circle * cos_a - sin_j * sin_a;
+                const int x = (int)(40.0f + 30.0f * inverse_depth *
+                    (cos_i * circle * cos_b - rotated_height * sin_b));
+                const int y = (int)(12.0f + 15.0f * inverse_depth *
+                    (cos_i * circle * sin_b + rotated_height * cos_b));
+                const int index = x + 80 * y;
+                const int brightness = (int)(8.0f *
+                    ((sin_j * sin_a - sin_i * cos_j * cos_a) * cos_b -
+                     sin_i * cos_j * sin_a - sin_j * cos_a - cos_i * cos_j * sin_b));
+
+                if (x >= 0 && x < 80 && y >= 0 && y < 22 &&
+                    inverse_depth > zbuffer[index]) {
+                    zbuffer[index] = inverse_depth;
+                    int shade = brightness < 0 ? 0 : brightness;
+                    if (shade > 11) shade = 11;
+                    pixels[index] = shades[shade];
+                }
+            }
+        }
+
+        /* Newlines are embedded without an extra framebuffer allocation. */
+        fputs("\x1b[H", stdout);
+        for (int row = 0; row < 22; ++row) {
+            fwrite(pixels + row * 80, 1, 80, stdout);
+            putchar('\n');
+        }
+        fflush(stdout);
+        a += 0.30f;
+        b += 0.15f;
+    }
+}
