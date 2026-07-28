@@ -1,0 +1,90 @@
+/******************************************************************************
+
+                            Online C Compiler.
+                Code, Compile, Run and Debug C program online.
+Write your code in this editor and press "Run" button to compile and execute it.
+
+*******************************************************************************/
+
+#define _POSIX_C_SOURCE 199309L   /* for nanosleep() under -std=c11 */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define SCREEN_WIDTH   150      /* columns of rain                        */
+#define LINE_COUNT     750      /* frames to render                       */
+#define LINE_SPEED_MS  100      /* delay between frames                   */
+#define GLYPH_BYTES    4        /* max UTF-8 bytes per glyph token (+pad)  */
+#define ESC_BYTES      11       /* "\033[38;5;NNNm" is at most 10 + NUL   */
+
+/* Glyph set: half-width ASCII "code" characters + Katakana, like the
+ * original's MATRIX_CHARS. Each entry is padded to GLYPH_BYTES so the
+ * per-column slot in the line buffer is a fixed size. */
+static const char GLYPHS[][GLYPH_BYTES] = {
+    "- ", "* ", "% ", "& ", "# ", "@ ",
+    "1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "0 ",
+    "ア", "ィ", "イ", "ゥ", "ウ", "ェ", "エ", "ォ", "オ",
+    "カ", "ガ", "キ", "ギ", "ク", "グ", "ケ", "ゲ", "コ", "ゴ",
+    "サ", "ザ", "シ", "ジ", "ス", "ズ", "セ", "ゼ", "ソ", "ゾ",
+    "タ", "ダ", "チ", "ヂ", "ッ", "ツ", "ヅ", "テ",
+};
+#define GLYPH_COUNT (int)(sizeof(GLYPHS) / sizeof(GLYPHS[0]))
+
+/* The two dim shades used for ordinary trailing glyphs (256-colour codes),
+ * chosen at random each tick — this is what gives the trail its flicker. */
+static const char *DIM_SHADES[] = { "22", "28" };
+#define BRIGHT_WHITE "\033[38;5;15m"   /* the glowing "head" of a drop */
+
+/* column state: 0 = blank, 1 = falling, 2 = bright head (spawn this tick) */
+static unsigned char column_state[SCREEN_WIDTH];
+
+static inline const char *random_glyph(void) {
+    return GLYPHS[rand() % GLYPH_COUNT];
+}
+
+static inline const char *random_dim_colour(void) {
+    return DIM_SHADES[rand() % 2];
+}
+
+int main(void) {
+    srand((unsigned)time(NULL));
+    memset(column_state, 1, sizeof(column_state));
+
+    /* One reusable frame buffer: worst case every column emits an escape
+     * code plus a glyph, so size it generously and grow the write pointer
+     * as we go rather than recomputing offsets. */
+    char *line = malloc(SCREEN_WIDTH * (ESC_BYTES + GLYPH_BYTES) + 1);
+    if (!line) return 1;
+
+    struct timespec delay = { .tv_sec = 0, .tv_nsec = LINE_SPEED_MS * 1000000L };
+
+    for (int frame = 0; frame < LINE_COUNT; frame++) {
+        char *w = line;
+
+        for (int col = 0; col < SCREEN_WIDTH; col++) {
+            unsigned char state = column_state[col];
+
+            if (state != 0) {                       /* falling or bright head */
+                if (state == 2) {
+                    w += sprintf(w, BRIGHT_WHITE "%s", random_glyph());
+                    column_state[col] = 1;           /* head only lasts one tick */
+                } else {
+                    w += sprintf(w, "\033[38;5;%sm%s", random_dim_colour(), random_glyph());
+                }
+                if (rand() % 30 == 0) column_state[col] = 0;   /* trail ends */
+            } else {                                 /* blank column */
+                w += sprintf(w, "\033[38;5;%sm ", random_dim_colour());
+                if (rand() % 60 == 0) column_state[col] = 2;   /* new drop spawns */
+            }
+        }
+
+        *w++ = '\n';
+        fwrite(line, 1, (size_t)(w - line), stdout);
+        fflush(stdout);
+        nanosleep(&delay, NULL);
+    }
+
+    free(line);
+    return 0;
+}
